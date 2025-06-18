@@ -1,0 +1,15 @@
+.navbar {
+  @apply bg-black text-white px-6 py-4 flex justify-between items-center shadow-md;
+}
+
+.navbar-title {
+  @apply text-xl font-bold text-[#fcb900];
+}
+
+.navbar-links {
+  @apply space-x-4;
+}
+
+.navbar-link {
+  @apply hover:text-[#fcb900];
+}

@@ -4,8 +4,10 @@ import '../styles/page.css'
 import Slider from 'react-slick'
 import { FaArrowLeft, FaArrowRight } from 'react-icons/fa'
 import jsPDF from 'jspdf'
+import logo from '../assets/aurorai-logo.png';
 
 
+// Arrow component for the slider
 function Arrow(props: any) {
   const { onClick, direction } = props
   return (
@@ -19,6 +21,7 @@ function Arrow(props: any) {
   )
 }
 
+// Hazard descriptions
 const hazardDescriptions: Record<string, {
   description: string;
   impact: string[];
@@ -80,7 +83,7 @@ const formatTime = (frameNumber: number, fps: number): string => {
 export default function Upload() {
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState('')
-  const [result, setResult] = useState<string>('')
+  const [result, setResult] = useState<string>('') // for image analysis result
   const [hazards, setHazards] = useState<string[]>([])
   const [videoReport, setVideoReport] = useState<any[]>([])
   const [currentSlide, setCurrentSlide] = useState(0)
@@ -137,66 +140,149 @@ export default function Upload() {
     nextArrow: <Arrow direction="right" />,
     prevArrow: <Arrow direction="left" />,
   }
-const downloadPDF = () => {
-  const doc = new jsPDF()
-  doc.setFontSize(16)
-  doc.setTextColor('#fcb900')
-  doc.text('AurorAI Report', 20, 20)
 
-  let y = 35
+  const filteredFrames = videoReport.filter(f => f.detections && f.detections.length > 0);
+  const currentFrame = filteredFrames[currentSlide];
 
-  const addHazardToPDF = (label: string) => {
-    const hazard = hazardDescriptions[label]
-    if (!hazard) return
+  // Function to convert image URL to base64
+  const getBase64FromUrl = async (url: string) => {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
 
-    doc.setFontSize(14)
-    doc.setTextColor('#000000')
-    doc.text(`Hazard: ${label}`, 20, y)
-    y += 8
+const downloadPDF = async () => {
+  const doc = new jsPDF();
 
-    doc.setFontSize(12)
-    doc.text('Description:', 20, y)
-    y += 6
-    doc.setFont('normal')
-    doc.text(doc.splitTextToSize(hazard.description, 170), 20, y)
-    y += 10
+  // Load logo
+  const logoBase64 = await getBase64FromUrl(logo);
 
-    doc.setFont('bold')
-    doc.text('Impact:', 20, y)
-    y += 6
-    doc.setFont('normal')
-    hazard.impact.forEach(item => {
-      doc.text(`• ${item}`, 25, y)
-      y += 6
-    })
+  // ✅ COVER PAGE
 
-    doc.setFont('bold')
-    doc.text('Recommendations:', 20, y)
-    y += 6
-    doc.setFont('normal')
-    hazard.recommendations.forEach(item => {
-      doc.text(`• ${item}`, 25, y)
-      y += 6
-    })
+  doc.addImage(logoBase64, 'PNG', 20, 10, 30, 30);
+  doc.setFontSize(30);
+  doc.setTextColor('#000000');
+  doc.text(
+    'AurorAI Road Hazard Detection Report',
+    doc.internal.pageSize.getWidth() / 2,
+    doc.internal.pageSize.getHeight() / 2,
+    { align: 'center' }
+  );
+  
+  let y = 60;
 
-    y += 10
-  }
+  // ✅ Text block printer with safe paging
+  const addHazardDetails = (label: string) => {
+    const hazard = hazardDescriptions[label];
+    if (!hazard) return;
 
-  if (result && hazards.length > 0) {
-    hazards.forEach(hazard => addHazardToPDF(hazard))
-  } else if (currentFrame && currentFrame.detections.length > 0) {
-    currentFrame.detections.forEach((det: any) => addHazardToPDF(det.label))
-  }
+    const safeWrite = (lines: string[]) => {
+      lines.forEach(line => {
+        doc.text(line, 20, y);
+        y += 6;
+        if (y > 270) {
+          doc.addPage();
+          doc.addImage(logoBase64, 'PNG', 20, 10, 30, 30);
+          y = 30;
+        }
+      });
+    };
 
-  doc.save('AurorAI_Report.pdf')
+    doc.setFontSize(14);
+    doc.setTextColor('#000000');
+    safeWrite([`Hazard: ${label}`]);
+    y += 2;
+
+    doc.setFontSize(12);
+    safeWrite(['Description:']);
+    safeWrite(doc.splitTextToSize(hazard.description, 170));
+    y += 4;
+
+    safeWrite(['Impact:']);
+    hazard.impact.forEach(item => safeWrite([`• ${item}`]));
+    y += 4;
+
+    safeWrite(['Recommendations:']);
+    hazard.recommendations.forEach(item => safeWrite([`• ${item}`]));
+    y += 10;
+  };
+
+ // ✅ For image analysis
+if (result && hazards.length > 0) {
+  doc.addPage();
+  doc.addImage(logoBase64, 'PNG', 20, 10, 30, 30);
+  doc.setFontSize(14);
+  doc.setTextColor('#000000');
+  let y = 50;
+
+  // Report details
+  hazards.forEach(hazard => {
+    const h = hazardDescriptions[hazard];
+    if (!h) return;
+
+    doc.setFontSize(12);
+    doc.text(`Hazard: ${hazard}`, 20, y);
+    y += 8;
+    doc.text('Description:', 20, y); y += 6;
+    doc.text(doc.splitTextToSize(h.description, 170), 20, y);
+    y += h.description.length > 80 ? 16 : 10;
+
+    doc.text('Impact:', 20, y); y += 6;
+    h.impact.forEach(item => { doc.text(`• ${item}`, 25, y); y += 6 });
+
+    doc.text('Recommendations:', 20, y); y += 6;
+    h.recommendations.forEach(item => { doc.text(`• ${item}`, 25, y); y += 6 });
+
+    y += 10;
+    if (y > 250) {
+      doc.addPage();
+      doc.addImage(logoBase64, 'PNG', 20, 10, 30, 30);
+      y = 40;
+    }
+  });
+
+  // ➕ Then add the analyzed image on a new page
+  const base64Data = result.split(',')[1]; // strip prefix
+  doc.addPage();
+  doc.addImage(logoBase64, 'PNG', 20, 10, 30, 30);
+  doc.text('Analyzed Image:', 20, 40);
+  doc.addImage(base64Data, 'JPEG', 20, 50, 160, 120);
 }
 
-  const filteredFrames = videoReport.filter(f => f.detections && f.detections.length > 0)
-  const currentFrame = filteredFrames[currentSlide]
+  // ✅ For video analysis
+  if (videoReport.length > 0 && filteredFrames.length > 0) {
+    for (let i = 0; i < filteredFrames.length; i++) {
+      const frame = filteredFrames[i];
+      const frameUrl = `http://127.0.0.1:8000${frame.image_url}`;
+      const imageBase64 = await getBase64FromUrl(frameUrl);
+
+      doc.addPage();
+      doc.addImage(logoBase64, 'PNG', 20, 10, 30, 30);
+      doc.setFontSize(14);
+      doc.text(`Frame ${frame.frame}`, 20, 40);
+      doc.addImage(imageBase64, 'JPEG', 20, 50, 160, 100);
+      y = 160;
+
+      frame.detections.forEach((det: any) => {
+        addHazardDetails(det.label);
+      });
+    }
+  }
+
+  doc.save('AurorAI_Report.pdf');
+};
+
 
   return (
     <AppLayout>
       <div className="flex flex-col items-center w-full">
+
+        {/* Upload Section */}
         {!analysisDone && (
           <div className="w-full flex flex-col items-center justify-center mt-14">
             <div className="bg-black border border-gray-800 rounded-2xl p-10 max-w-xl w-full text-center transition-all duration-300">
@@ -206,7 +292,7 @@ const downloadPDF = () => {
               <p className="text-white mb-8">
                 Upload an <strong>image</strong> or <strong>video</strong> file to detect road hazards using AI.
               </p>
-              <label htmlFor="file-upload" className="inline-flex items-center justify-center bg-white hover:bg-[#e3e1dc] text-[#fcb900] font-semibold px-6 py-3 rounded-lg  cursor-pointer transition-all duration-200">
+              <label htmlFor="file-upload" className="inline-flex items-center justify-center bg-white hover:bg-[#e3e1dc] text-[#fcb900] font-semibold px-6 py-3 rounded-lg cursor-pointer transition-all duration-200">
                 📁 Choose File
                 <input id="file-upload" type="file" accept="image/*,video/*" onChange={handleFileChange} className="hidden" />
               </label>
@@ -227,124 +313,108 @@ const downloadPDF = () => {
             </div>
           </div>
         )}
-      </div>
 
-{(result || filteredFrames.length > 0) && (
-  <>
-    <div className="flex flex-row w-[90%] gap-12 mt-8">
-      {filteredFrames.length > 0 && (
-        <div className="w-[60%]">
-          <h2 className="text-2xl font-semibold mb-4 text-left">🎥 Frame Viewer</h2>
-          <Slider {...sliderSettings}>
-            {filteredFrames.map((frame, index) =>
-              frame.image_url ? (
-                <div key={index} className="relative px-4 h-[550px] flex justify-center items-center">
-                  <img
-                    src={`http://127.0.0.1:8000${frame.image_url}`}
-                    alt={`Frame ${frame.frame}`}
-                    className="w-full h-auto rounded border"
-                  />
-                </div>
-              ) : null
+        {/* Result Section */}
+        {(result || filteredFrames.length > 0) && (
+          <div className="flex flex-row w-[90%] gap-12 mt-8">
+            {/* Frame Viewer */}
+            {filteredFrames.length > 0 && (
+              <div className="w-[60%]">
+                <h2 className="text-2xl font-semibold mb-4 text-left">🎥 Frame Viewer</h2>
+                <Slider {...sliderSettings}>
+                  {filteredFrames.map((frame, index) =>
+                    frame.image_url ? (
+                      <div key={index} className="relative px-4 h-[550px] flex justify-center items-center">
+                        <img src={`http://127.0.0.1:8000${frame.image_url}`} alt={`Frame ${frame.frame}`} className="w-full h-auto rounded border" />
+                      </div>
+                    ) : null
+                  )}
+                </Slider>
+                {currentFrame && (
+                  <div className="mt-4 text-center text-gray-800">
+                    <p className="font-medium text-base">
+                      Frame {currentFrame.frame} ({formatTime(currentFrame.frame, fps)})
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
-            
-          </Slider>
-          {currentFrame && (
-            <div className="mt-4 text-center text-gray-800">
-              <p className="font-medium text-base">
-                Frame {currentFrame.frame} ({formatTime(currentFrame.frame, fps)})
-              </p>
+
+            {/* Image Analysis */}
+            {result && (
+              <div className="w-[60%]">
+                <h2 className="text-2xl font-semibold mb-4 text-left">🖼️ Image Analysis</h2>
+                <img src={result} alt="Result" className="w-full h-auto rounded border" />
+              </div>
+            )}
+
+            {/* Report */}
+            <div className="w-[40%]">
+              {/* For video */}
+              {currentFrame && currentFrame.detections.length > 0 && (
+                <div className="mt-8 p-6 border rounded-xl shadow-md bg-white text-left w-full">
+                  <h3 className="text-xl font-semibold mb-2">📄 Report</h3>
+                  {currentFrame.detections.map((det: any, i: number) => {
+                    const hazard = hazardDescriptions[det.label];
+                    if (!hazard) return null;
+                    return (
+                      <div key={i} className="mb-6">
+                        <p className="mb-2 text-gray-800">{hazard.description}</p>
+                        <p className="font-semibold text-[#fcb900]">Impact :</p>
+                        <ul className="list-disc list-inside mb-3 text-gray-700">
+                          {hazard.impact.map((item, idx) => <li key={idx}>{item}</li>)}
+                        </ul>
+                        <p className="font-semibold text-[#fcb900]">Recommendations:</p>
+                        <ul className="list-disc list-inside text-gray-700">
+                          {hazard.recommendations.map((item, idx) => <li key={idx}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )
+                  })}
+
+                  {/* Download Button */}
+                  <div className="flex justify-end mt-4">
+                    <button onClick={downloadPDF} className="bg-[#fcb900] text-black px-4 py-2 rounded hover:bg-yellow-400 transition font-semibold">
+                      📄 Download Report
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* For image */}
+              {result && hazards.length > 0 && (
+                <div className="mt-8 p-6 border rounded-xl shadow-md bg-white text-left w-full">
+                  <h3 className="text-xl font-semibold mb-2">📄 Report</h3>
+                  {hazards.map((hazard, i) => {
+                    const info = hazardDescriptions[hazard];
+                    if (!info) return null;
+                    return (
+                      <div key={i} className="mb-6">
+                        <p className="mb-2 text-gray-800">{info.description}</p>
+                        <p className="font-semibold text-[#fcb900]">Impact :</p>
+                        <ul className="list-disc list-inside mb-3 text-gray-700">
+                          {info.impact.map((item, idx) => <li key={idx}>{item}</li>)}
+                        </ul>
+                        <p className="font-semibold text-[#fcb900]">Recommendations:</p>
+                        <ul className="list-disc list-inside text-gray-700">
+                          {info.recommendations.map((item, idx) => <li key={idx}>{item}</li>)}
+                        </ul>
+                      </div>
+                    )
+                  })}
+
+                  {/* Download Button */}
+                  <div className="flex justify-end mt-4">
+                    <button onClick={downloadPDF} className="bg-[#fcb900] text-black px-4 py-2 rounded hover:bg-yellow-400 transition font-semibold">
+                      📄 Download Report
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        
-      )}
-      
-
-      {result && (
-        <div className="w-[60%]">
-          <h2 className="text-2xl font-semibold mb-4 text-left">🖼️ Image Analysis</h2>
-          <img src={result} alt="Result" className="w-full h-auto rounded border" />
-        </div>
-      )}
-
-      <div className="w-[40%]">
-        {currentFrame && currentFrame.detections.length > 0 && (
-          <div className="mt-8 p-6 border rounded-xl shadow-md bg-white text-left w-full">
-            <h3 className="text-xl font-semibold mb-2">📄 Report</h3>
-            {currentFrame.detections.map((det: any, i: number) => {
-              const hazard = hazardDescriptions[det.label]
-              if (!hazard) return null
-              return (
-                <div key={i} className="mb-6">
-                  <p className="mb-2 text-gray-800">{hazard.description}</p>
-                  <p className="font-semibold text-[#fcb900]">Impact :</p>
-                  <ul className="list-disc list-inside mb-3 text-gray-700">
-                    {hazard.impact.map((item, idx) => <li key={idx}>{item}</li>)}
-                  </ul>
-                  <p className="font-semibold text-[#fcb900]">Recommendations:</p>
-                  <ul className="list-disc list-inside text-gray-700">
-                    {hazard.recommendations.map((item, idx) => <li key={idx}>{item}</li>)}
-                  </ul>
-                </div>
-              )
-            })}
-            
-            <div className="flex justify-end mt-4">
-      <button
-        onClick={downloadPDF}
-        className="bg-[#fcb900] text-black px-4 py-2 rounded hover:bg-yellow-400 transition font-semibold"
-      >
-        📄 Download Report
-      </button>
-    </div>
           </div>
-          
-          
-        )}
-        
-
-        {result && hazards.length > 0 && (
-          <div className="mt-8 p-6 border rounded-xl shadow-md bg-white text-left w-full">
-            <h3 className="text-xl font-semibold mb-2">📄 Report</h3>
-            {hazards.map((hazard, i) => {
-              const info = hazardDescriptions[hazard]
-              if (!info) return null
-              return (
-                <div key={i} className="mb-6">
-                  <p className="mb-2 text-gray-800">{info.description}</p>
-                  <p className="font-semibold text-[#fcb900]">Impact :</p>
-                  <ul className="list-disc list-inside mb-3 text-gray-700">
-                    {info.impact.map((item, idx) => <li key={idx}>{item}</li>)}
-                  </ul>
-                  <p className="font-semibold text-[#fcb900]">Recommendations:</p>
-                  <ul className="list-disc list-inside text-gray-700">
-                    {info.recommendations.map((item, idx) => <li key={idx}>{item}</li>)}
-                  </ul>
-                </div>
-              )
-              
-            })}
-             <div className="flex justify-end mt-4">
-      <button
-        onClick={downloadPDF}
-        className="bg-[#fcb900] text-black px-4 py-2 rounded hover:bg-yellow-400 transition font-semibold"
-      >
-        📄 Download Report
-      </button>
-    </div>
-          </div>
-          
         )}
       </div>
-      
-    </div>
-
-
-
-  </>
-  
-)}
-</AppLayout>
+    </AppLayout>
   )
 }

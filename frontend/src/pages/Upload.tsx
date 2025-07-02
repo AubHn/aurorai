@@ -90,6 +90,7 @@ export default function Upload() {
   const [loading, setLoading] = useState(false)
   const [analysisDone, setAnalysisDone] = useState(false)
   const [fps, setFps] = useState<number>(30)
+  const [confidence, setConfidence] = useState<number>(0.5);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -103,31 +104,40 @@ export default function Upload() {
     }
   }
 
-  const handleUpload = async () => {
-    if (!file) return
-    setLoading(true)
+const handleUpload = async () => {
+  if (!file) return
+  setLoading(true)
 
-    const formData = new FormData()
-    formData.append('file', file)
+  const formData = new FormData()
+  formData.append('file', file)
 
-    const isVideo = file.type.startsWith('video/')
-    const res = await fetch(`http://127.0.0.1:8000/${isVideo ? 'analyze_video' : 'predict'}`, {
-      method: 'POST',
-      body: isVideo ? (formData.append('interval_seconds', '1.0'), formData) : formData,
-    })
+  const isVideo = file.type.startsWith('video/')
 
-    const data = await res.json()
-    if (isVideo) {
-      setVideoReport(data.video_analysis || [])
-      if (data.fps) setFps(data.fps)
-    } else {
-      setResult(`data:image/jpeg;base64,${data.image}`)
-      setHazards(data.classes || [])
-    }
-
-    setLoading(false)
-    setAnalysisDone(true)
+  if (isVideo) {
+    formData.append('interval_seconds', '1.0')
+    formData.append('confidence', confidence.toString()) 
+  } else {
+    formData.append('confidence', confidence.toString())
   }
+
+  const res = await fetch(`http://127.0.0.1:8000/${isVideo ? 'analyze_video' : 'predict'}`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  const data = await res.json()
+  if (isVideo) {
+    setVideoReport(data.video_analysis || [])
+    if (data.fps) setFps(data.fps)
+  } else {
+    setResult(`data:image/jpeg;base64,${data.image}`)
+    setHazards(data.classes || [])
+  }
+
+  setLoading(false)
+  setAnalysisDone(true)
+}
+
 
   const sliderSettings = {
     dots: true,
@@ -173,7 +183,7 @@ const downloadPDF = async () => {
     doc.internal.pageSize.getHeight() / 2,
     { align: 'center' }
   );
-  
+
   let y = 60;
 
   // ✅ Text block printer with safe paging
@@ -306,10 +316,38 @@ if (result && hazards.length > 0) {
                 </div>
               )}
               {file && !result && videoReport.length === 0 && (
-                <button onClick={handleUpload} disabled={loading} className="mt-6 bg-white text-[#fcb900] px-6 py-3 rounded-lg font-semibold hover:bg-[#e3e1dc] transition duration-200">
-                  {loading ? 'Analyzing...' : 'Analyze'}
-                </button>
-              )}
+  <>
+    {/* Slider Confidence */}
+    <div className="mt-6 text-white text-left w-full">
+      <label htmlFor="confidence" className="block text-sm mb-2">Confidence Threshold</label>
+      <input
+        type="range"
+        id="confidence"
+        min="0"
+        max="1"
+        step="0.01"
+        value={confidence}
+        onChange={(e) => setConfidence(parseFloat(e.target.value))}
+        className="w-full accent-[#fcb900]"
+      />
+      <div className="flex justify-between text-sm mt-1 text-white">
+        <span>0.00</span>
+        <span className="text-center text-[#fcb900] font-semibold">{confidence.toFixed(2)}</span>
+        <span>1.00</span>
+      </div>
+    </div>
+
+    {/* Analyze button */}
+    <button
+      onClick={handleUpload}
+      disabled={loading}
+      className="mt-6 bg-white text-[#fcb900] px-6 py-3 rounded-lg font-semibold hover:bg-[#e3e1dc] transition duration-200"
+    >
+      {loading ? 'Analyzing...' : 'Analyze'}
+    </button>
+  </>
+)}
+
             </div>
           </div>
         )}

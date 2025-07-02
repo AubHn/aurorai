@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -19,20 +19,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create static folder for annotated frames
 os.makedirs("static/frames", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Load YOLOv8 model
 model = YOLO("model/best.pt")
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(
+    file: UploadFile = File(...),
+    confidence: float = Form(0.5)  # ← Added
+):
     contents = await file.read()
     nparr = np.frombuffer(contents, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    results = model(img, verbose=False)
+    results = model(img, verbose=False, conf=confidence)  # ← Updated
     detections = results[0].boxes
 
     classes = []
@@ -57,7 +58,11 @@ async def predict(file: UploadFile = File(...)):
 
 
 @app.post("/analyze_video")
-async def analyze_video(file: UploadFile = File(...), interval_seconds: float = 1.0):
+async def analyze_video(
+    file: UploadFile = File(...),
+    interval_seconds: float = Form(1.0),
+    confidence: float = Form(0.5)  # ← Added
+):
     video_id = str(uuid.uuid4())
     temp_video_path = f"temp_{video_id}.mp4"
 
@@ -77,7 +82,7 @@ async def analyze_video(file: UploadFile = File(...), interval_seconds: float = 
             break
 
         if frame_idx % interval_frames == 0:
-            results = model(frame, verbose=False)
+            results = model(frame, verbose=False, conf=confidence)  # ← Updated
             detections = results[0].boxes
 
             frame_detections = []
@@ -85,15 +90,14 @@ async def analyze_video(file: UploadFile = File(...), interval_seconds: float = 
                 for box in detections:
                     label_idx = int(box.cls.item())
                     label = model.names[label_idx]
-                    confidence = float(box.conf.item())
+                    confidence_score = float(box.conf.item())
                     xyxy = box.xyxy[0].cpu().numpy().tolist()
                     frame_detections.append({
                         "label": label,
-                        "confidence": confidence,
+                        "confidence": confidence_score,
                         "bbox": xyxy
                     })
 
-                # Annotate frame
                 for det in frame_detections:
                     x1, y1, x2, y2 = map(int, det['bbox'])
                     label = det['label']
@@ -109,7 +113,6 @@ async def analyze_video(file: UploadFile = File(...), interval_seconds: float = 
                         2
                     )
 
-                # Save frame only if there are detections
                 frame_filename = f"static/frames/frame_{frame_idx}.jpg"
                 cv2.imwrite(frame_filename, frame)
                 image_url = f"/static/frames/frame_{frame_idx}.jpg"
